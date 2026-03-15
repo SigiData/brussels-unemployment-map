@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Brussels Unemployment by Municipality — 2025 Average</title>
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <style>
+    :root {
+      --bg: #0f0b1f;
+      --panel: #17122d;
+      --panel-2: #211a3e;
+      --text: #f5f1ff;
+      --muted: #cbbfe8;
+      --accent: #b69cff;
+      --line: #352b5c;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; font-family: Inter, Arial, sans-serif; background: var(--bg); color: var(--text); }
+    .app { display: grid; grid-template-rows: auto auto 1fr; min-height: 100vh; }
+    .header { padding: 20px 22px 12px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0)); }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    .sub { color: var(--muted); font-size: 14px; line-height: 1.45; }
+    .bar-wrap { padding: 14px 22px 18px; border-bottom: 1px solid var(--line); }
+    .bar-title { display:flex; justify-content:space-between; gap:12px; font-size:13px; color:var(--muted); margin-bottom:8px; }
+    .stacked-bar {
+      width: 100%; height: 34px; background: #120f24; border: 1px solid var(--line);
+      border-radius: 999px; overflow: hidden; display: flex;
+    }
+    .seg {
+      height: 100%; min-width: 0.7%;
+      border-right: 1px solid rgba(255,255,255,0.14);
+      cursor: pointer; position: relative;
+    }
+    .seg:hover::after {
+      content: attr(data-label);
+      position: absolute; left: 50%; top: -34px; transform: translateX(-50%);
+      background: #181231; color: white; border: 1px solid var(--line);
+      padding: 4px 8px; border-radius: 8px; font-size: 12px; white-space: nowrap;
+      pointer-events: none;
+    }
+    .content { display:grid; grid-template-columns: minmax(260px, 360px) 1fr; min-height: 0; }
+    .side { border-right:1px solid var(--line); background: var(--panel); padding: 18px; overflow:auto; }
+    .card { background: rgba(255,255,255,0.03); border:1px solid var(--line); border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+    .card h2 { margin:0 0 10px; font-size: 16px; }
+    .metric { display:flex; justify-content:space-between; gap: 12px; padding: 7px 0; border-bottom:1px dashed rgba(255,255,255,0.08); font-size:14px; }
+    .metric:last-child { border-bottom:none; }
+    .legend-item { display:flex; align-items:center; gap:10px; margin:8px 0; font-size:14px; color:var(--muted); }
+    .swatch { width:14px; height:14px; border-radius:4px; border:1px solid rgba(255,255,255,0.15); }
+    .rank-list { display:grid; gap:10px; }
+    .rank-item {
+      display:grid; grid-template-columns: 1fr auto; gap:8px;
+      background: rgba(255,255,255,0.03); border:1px solid var(--line); border-radius: 12px; padding: 10px 12px;
+      cursor:pointer;
+    }
+    .rank-item small { color:var(--muted); }
+    #map { width: 100%; height: 100%; min-height: 620px; }
+    .leaflet-container { background: #eae3f7; }
+    .info-note { font-size:12px; color:var(--muted); line-height:1.45; }
+    .status { font-size: 13px; color: var(--muted); margin-top: 10px; }
+    .footer { padding: 10px 22px 18px; color: var(--muted); font-size: 12px; border-top:1px solid var(--line); background: #120f24; }
+    .pill { display:inline-block; padding:4px 8px; border:1px solid var(--line); border-radius:999px; margin-right:6px; margin-top:6px; font-size:12px; color:var(--muted); }
+    @media (max-width: 920px) {
+      .content { grid-template-columns: 1fr; }
+      .side { border-right:none; border-bottom:1px solid var(--line); }
+      #map { min-height: 70vh; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <h1>Brussels unemployment by municipality — 2025 average</h1>
+    <div class="sub">Interactive choropleth map in English. French municipality names are used for the map labels and joins.</div>
+  </div>
+
+  <div class="bar-wrap">
+    <div class="bar-title">
+      <div>Share of registered job seekers by municipality</div>
+      <div id="barSummary"></div>
+    </div>
+    <div id="stackedBar" class="stacked-bar" aria-label="Municipality shares"></div>
+  </div>
+
+  <div class="content">
+    <aside class="side">
+      <div class="card">
+        <h2>Selected municipality</h2>
+        <div id="selected">Click a municipality on the map or a row below.</div>
+      </div>
+
+      <div class="card">
+        <h2>Legend</h2>
+        <div class="legend-item"><span class="swatch" style="background:#c7f9cc"></span> Low &lt; 9%</div>
+        <div class="legend-item"><span class="swatch" style="background:#7bd389"></span> Medium 9–12%</div>
+        <div class="legend-item"><span class="swatch" style="background:#9d4edd"></span> High 12–16%</div>
+        <div class="legend-item"><span class="swatch" style="background:#5a189a"></span> Very high &gt; 16%</div>
+      </div>
+
+      <div class="card">
+        <h2>Top rates</h2>
+        <div id="rankings" class="rank-list"></div>
+      </div>
+
+      <div class="card">
+        <h2>Notes</h2>
+        <div class="info-note">
+          The geometry is fetched live from the official Brussels open-data boundary dataset.
+          The unemployment values in this demo come from the map-ready CSV prepared in this chat and are intended for visualisation.
+        </div>
+        <div class="pill">English map</div>
+        <div class="pill">French municipality names</div>
+        <div class="pill">Hover + click</div>
+      </div>
+    </aside>
+
+    <main id="map"></main>
+  </div>
+
+  <div class="footer">
+    Source geometry: Brussels open data administrative boundaries dataset. Data layer: map-ready 2025 municipal unemployment CSV prepared for this project.
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+  crossorigin=""></script>
+<script>
+const unemploymentData = [{"municipality_fr": "Anderlecht", "municipality_nl": "Anderlecht", "unemployed_persons_2025_avg": 10180, "population_estimate_2025": 121000, "unemployment_rate_percent": 18.4, "color_band": "very_high"}, {"municipality_fr": "Auderghem", "municipality_nl": "Oudergem", "unemployed_persons_2025_avg": 1650, "population_estimate_2025": 34000, "unemployment_rate_percent": 9.5, "color_band": "medium"}, {"municipality_fr": "Berchem-Sainte-Agathe", "municipality_nl": "Sint-Agatha-Berchem", "unemployed_persons_2025_avg": 2680, "population_estimate_2025": 26000, "unemployment_rate_percent": 13.0, "color_band": "high"}, {"municipality_fr": "Bruxelles-Ville", "municipality_nl": "Stad Brussel", "unemployed_persons_2025_avg": 13120, "population_estimate_2025": 187000, "unemployment_rate_percent": 15.2, "color_band": "high"}, {"municipality_fr": "Etterbeek", "municipality_nl": "Etterbeek", "unemployed_persons_2025_avg": 3500, "population_estimate_2025": 48000, "unemployment_rate_percent": 10.9, "color_band": "medium"}, {"municipality_fr": "Evere", "municipality_nl": "Evere", "unemployed_persons_2025_avg": 3150, "population_estimate_2025": 42000, "unemployment_rate_percent": 12.4, "color_band": "high"}, {"municipality_fr": "Forest", "municipality_nl": "Vorst", "unemployed_persons_2025_avg": 5280, "population_estimate_2025": 56000, "unemployment_rate_percent": 16.5, "color_band": "very_high"}, {"municipality_fr": "Ganshoren", "municipality_nl": "Ganshoren", "unemployed_persons_2025_avg": 2520, "population_estimate_2025": 25000, "unemployment_rate_percent": 12.7, "color_band": "high"}, {"municipality_fr": "Ixelles", "municipality_nl": "Elsene", "unemployed_persons_2025_avg": 7700, "population_estimate_2025": 87000, "unemployment_rate_percent": 13.3, "color_band": "high"}, {"municipality_fr": "Jette", "municipality_nl": "Jette", "unemployed_persons_2025_avg": 5250, "population_estimate_2025": 53000, "unemployment_rate_percent": 11.2, "color_band": "medium"}, {"municipality_fr": "Koekelberg", "municipality_nl": "Koekelberg", "unemployed_persons_2025_avg": 3020, "population_estimate_2025": 22000, "unemployment_rate_percent": 13.9, "color_band": "high"}, {"municipality_fr": "Molenbeek-Saint-Jean", "municipality_nl": "Sint-Jans-Molenbeek", "unemployed_persons_2025_avg": 10420, "population_estimate_2025": 98000, "unemployment_rate_percent": 21.3, "color_band": "very_high"}, {"municipality_fr": "Saint-Gilles", "municipality_nl": "Sint-Gillis", "unemployed_persons_2025_avg": 6180, "population_estimate_2025": 50000, "unemployment_rate_percent": 17.9, "color_band": "very_high"}, {"municipality_fr": "Saint-Josse-ten-Noode", "municipality_nl": "Sint-Joost-ten-Node", "unemployed_persons_2025_avg": 4180, "population_estimate_2025": 27000, "unemployment_rate_percent": 23.1, "color_band": "very_high"}, {"municipality_fr": "Schaerbeek", "municipality_nl": "Schaarbeek", "unemployed_persons_2025_avg": 15010, "population_estimate_2025": 134000, "unemployment_rate_percent": 17.4, "color_band": "very_high"}, {"municipality_fr": "Uccle", "municipality_nl": "Ukkel", "unemployed_persons_2025_avg": 3620, "population_estimate_2025": 86000, "unemployment_rate_percent": 8.4, "color_band": "low"}, {"municipality_fr": "Watermael-Boitsfort", "municipality_nl": "Watermaal-Bosvoorde", "unemployed_persons_2025_avg": 1350, "population_estimate_2025": 25000, "unemployment_rate_percent": 7.0, "color_band": "low"}, {"municipality_fr": "Woluwe-Saint-Lambert", "municipality_nl": "Sint-Lambrechts-Woluwe", "unemployed_persons_2025_avg": 3200, "population_estimate_2025": 59000, "unemployment_rate_percent": 8.2, "color_band": "low"}, {"municipality_fr": "Woluwe-Saint-Pierre", "municipality_nl": "Sint-Pieters-Woluwe", "unemployed_persons_2025_avg": 2320, "population_estimate_2025": 42000, "unemployment_rate_percent": 6.7, "color_band": "low"}];
+
+const colors = {
+  low: "#c7f9cc",
+  medium: "#7bd389",
+  high: "#9d4edd",
+  very_high: "#5a189a",
+  nodata: "#d8d4e8"
+};
+
+const nameAliases = new Map([
+  ["saint-josse-ten-noode", "Saint-Josse-ten-Noode"],
+  ["saint josse ten noode", "Saint-Josse-ten-Noode"],
+  ["st-josse-ten-noode", "Saint-Josse-ten-Noode"],
+  ["st josse ten noode", "Saint-Josse-ten-Noode"],
+  ["bruxelles", "Bruxelles-Ville"],
+  ["ville de bruxelles", "Bruxelles-Ville"],
+  ["bruxelles-ville", "Bruxelles-Ville"],
+  ["brussel", "Bruxelles-Ville"],
+  ["stad brussel", "Bruxelles-Ville"],
+  ["molenbeek-saint-jean", "Molenbeek-Saint-Jean"],
+  ["sint-jans-molenbeek", "Molenbeek-Saint-Jean"],
+  ["berchem-sainte-agathe", "Berchem-Sainte-Agathe"],
+  ["sint-agatha-berchem", "Berchem-Sainte-Agathe"],
+  ["watermael-boitsfort", "Watermael-Boitsfort"],
+  ["watermaal-bosvoorde", "Watermael-Boitsfort"],
+  ["woluwe-saint-lambert", "Woluwe-Saint-Lambert"],
+  ["sint-lambrechts-woluwe", "Woluwe-Saint-Lambert"],
+  ["woluwe-saint-pierre", "Woluwe-Saint-Pierre"],
+  ["sint-pieters-woluwe", "Woluwe-Saint-Pierre"],
+  ["forest", "Forest"],
+  ["vorst", "Forest"],
+  ["ixelles", "Ixelles"],
+  ["elsene", "Ixelles"],
+  ["uccle", "Uccle"],
+  ["ukkel", "Uccle"],
+  ["schaerbeek", "Schaerbeek"],
+  ["schaarbeek", "Schaerbeek"],
+  ["auderghem", "Auderghem"],
+  ["oudergem", "Auderghem"],
+  ["anderlecht", "Anderlecht"],
+  ["evere", "Evere"],
+  ["etterbeek", "Etterbeek"],
+  ["ganshoren", "Ganshoren"],
+  ["jette", "Jette"],
+  ["koekelberg", "Koekelberg"],
+  ["saint-gilles", "Saint-Gilles"],
+  ["sint-gillis", "Saint-Gilles"]
+]);
+
+const byName = new Map(unemploymentData.map(d => [d.municipality_fr, d]));
+const totalJobSeekers = unemploymentData.reduce((s, d) => s + d.unemployed_persons_2025_avg, 0);
+
+function normalizeName(value) {
+  return String(value || "")
+    .normalize("NFD").replace(/\p{Diacritic}/gu, "")
+    .replace(/[’']/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function canonicalName(raw) {
+  const norm = normalizeName(raw);
+  return nameAliases.get(norm) || raw || null;
+}
+
+function colorFor(rate) {
+  if (rate == null || Number.isNaN(rate)) return colors.nodata;
+  if (rate < 9) return colors.low;
+  if (rate < 12) return colors.medium;
+  if (rate < 16) return colors.high;
+  return colors.very_high;
+}
+
+function fmtInt(n) {
+  return new Intl.NumberFormat("en-GB").format(n);
+}
+
+function fmtPct(n) {
+  return `${Number(n).toFixed(1)}%`;
+}
+
+function updateSelected(d) {
+  const el = document.getElementById("selected");
+  if (!d) {
+    el.innerHTML = "<div class='info-note'>No municipality selected.</div>";
+    return;
+  }
+  const share = d.unemployed_persons_2025_avg / totalJobSeekers * 100;
+  el.innerHTML = `
+    <div class="metric"><span>Municipality</span><strong>${d.municipality_fr}</strong></div>
+    <div class="metric"><span>Dutch name</span><strong>${d.municipality_nl}</strong></div>
+    <div class="metric"><span>Unemployment rate</span><strong>${fmtPct(d.unemployment_rate_percent)}</strong></div>
+    <div class="metric"><span>Registered job seekers</span><strong>${fmtInt(d.unemployed_persons_2025_avg)}</strong></div>
+    <div class="metric"><span>Population</span><strong>${fmtInt(d.population_estimate_2025)}</strong></div>
+    <div class="metric"><span>Share of Brussels total</span><strong>${share.toFixed(1)}%</strong></div>
+  `;
+}
+
+function buildBar() {
+  const bar = document.getElementById("stackedBar");
+  const sorted = [...unemploymentData].sort((a, b) => b.unemployed_persons_2025_avg - a.unemployed_persons_2025_avg);
+  document.getElementById("barSummary").textContent = `${fmtInt(totalJobSeekers)} registered job seekers`;
+  sorted.forEach(d => {
+    const seg = document.createElement("div");
+    const share = d.unemployed_persons_2025_avg / totalJobSeekers * 100;
+    seg.className = "seg";
+    seg.style.width = `${share}%`;
+    seg.style.background = colorFor(d.unemployment_rate_percent);
+    seg.dataset.label = `${d.municipality_fr} · ${share.toFixed(1)}%`;
+    seg.title = `${d.municipality_fr} — ${share.toFixed(1)}% of total`;
+    seg.addEventListener("click", () => updateSelected(d));
+    bar.appendChild(seg);
+  });
+}
+
+function buildRankings() {
+  const list = document.getElementById("rankings");
+  [...unemploymentData]
+    .sort((a, b) => b.unemployment_rate_percent - a.unemployment_rate_percent)
+    .slice(0, 8)
+    .forEach((d, i) => {
+      const row = document.createElement("div");
+      row.className = "rank-item";
+      row.innerHTML = `
+        <div>
+          <div><strong>#${i+1} ${d.municipality_fr}</strong></div>
+          <small>${fmtInt(d.unemployed_persons_2025_avg)} job seekers</small>
+        </div>
+        <div><strong>${fmtPct(d.unemployment_rate_percent)}</strong></div>
+      `;
+      row.addEventListener("click", () => updateSelected(d));
+      list.appendChild(row);
+    });
+}
+
+buildBar();
+buildRankings();
+updateSelected(unemploymentData.find(d => d.municipality_fr === "Bruxelles-Ville"));
+
+const map = L.map("map", { zoomControl: true }).setView([50.8467, 4.3525], 11);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 18,
+  attribution: "&copy; OpenStreetMap contributors"
+}).addTo(map);
+
+let geoLayer = null;
+
+function featureName(props) {
+  const candidates = [
+    props.name_fr, props.nom_fr, props.commune_fr, props.municipality_fr,
+    props.name, props.nom, props.libelle_fr, props.label_fr,
+    props.name_nl, props.nom_nl, props.commune_nl
+  ].filter(Boolean);
+
+  for (const c of candidates) {
+    const canon = canonicalName(c);
+    if (byName.has(canon)) return canon;
+  }
+
+  for (const [k, v] of Object.entries(props || {})) {
+    if (typeof v === "string") {
+      const canon = canonicalName(v);
+      if (byName.has(canon)) return canon;
+    }
+  }
+  return null;
+}
+
+function styleFeature(feature) {
+  const name = featureName(feature.properties || {});
+  const d = name ? byName.get(name) : null;
+  return {
+    fillColor: d ? colorFor(d.unemployment_rate_percent) : colors.nodata,
+    weight: 1.5,
+    opacity: 1,
+    color: "#2d214d",
+    fillOpacity: 0.8
+  };
+}
+
+function highlightFeature(e) {
+  const layer = e.target;
+  layer.setStyle({
+    weight: 3,
+    color: "#140d24",
+    fillOpacity: 0.94
+  });
+  layer.bringToFront();
+}
+
+function resetHighlight(e) {
+  if (geoLayer) geoLayer.resetStyle(e.target);
+}
+
+function zoomToFeature(e) {
+  map.fitBounds(e.target.getBounds(), { padding: [16,16] });
+  const name = featureName(e.target.feature.properties || {});
+  updateSelected(name ? byName.get(name) : null);
+}
+
+function onEachFeature(feature, layer) {
+  const name = featureName(feature.properties || {});
+  const d = name ? byName.get(name) : null;
+  const html = d ? `
+    <strong>${d.municipality_fr}</strong><br/>
+    Unemployment rate: ${fmtPct(d.unemployment_rate_percent)}<br/>
+    Registered job seekers: ${fmtInt(d.unemployed_persons_2025_avg)}<br/>
+    Population: ${fmtInt(d.population_estimate_2025)}
+  ` : `<strong>${name || "Unknown municipality"}</strong><br/>No data match`;
+  layer.bindTooltip(html, { sticky: true });
+  layer.on({
+    mouseover: highlightFeature,
+    mouseout: resetHighlight,
+    click: zoomToFeature
+  });
+}
+
+const status = document.createElement("div");
+status.className = "status";
+status.textContent = "Loading official municipality boundaries…";
+document.querySelector(".side .card:last-child").appendChild(status);
+
+const geoJsonUrl = "https://opendata.brussels.be/api/explore/v2.1/catalog/datasets/limites-administratives-des-communes-en-region-de-bruxelles-capitale/exports/geojson?lang=en&timezone=Europe%2FBrussels";
+
+fetch(geoJsonUrl)
+  .then(r => {
+    if (!r.ok) throw new Error("Could not fetch boundary dataset");
+    return r.json();
+  })
+  .then(geojson => {
+    geoLayer = L.geoJSON(geojson, {
+      style: styleFeature,
+      onEachFeature
+    }).addTo(map);
+    map.fitBounds(geoLayer.getBounds(), { padding: [20,20] });
+    status.textContent = "Boundaries loaded successfully.";
+  })
+  .catch(err => {
+    console.error(err);
+    status.textContent = "Could not load the live boundary dataset. Open this file with internet access to display the map.";
+  });
+</script>
+</body>
+</html>
